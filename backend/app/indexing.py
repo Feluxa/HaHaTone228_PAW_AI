@@ -150,6 +150,8 @@ def build_reddit_index():
 
 
 if __name__ == "__main__":
+    
+    
     build_reddit_index()
 
     #Для отладки потом можно вернуть:

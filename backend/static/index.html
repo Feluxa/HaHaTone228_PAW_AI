@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Reddit Code Assistant</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+        :root {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background-color: #0f172a;
+            color: #e5e7eb;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .app {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 24px 16px 40px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        h1 {
+            font-size: 24px;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        h1 span.logo {
+            display: inline-flex;
+            width: 32px;
+            height: 32px;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #22c55e, #0ea5e9);
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 16px;
+            color: #0f172a;
+        }
+
+        .subtitle {
+            color: #9ca3af;
+            font-size: 14px;
+        }
+
+        .card {
+            background-color: #020617;
+            border-radius: 16px;
+            padding: 16px 18px;
+            box-shadow: 0 12px 30px rgba(15, 23, 42, 0.8);
+            border: 1px solid #1f2937;
+        }
+
+        .input-row {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 64px;
+            max-height: 200px;
+            resize: vertical;
+            padding: 10px 12px;
+            border-radius: 12px;
+            border: 1px solid #374151;
+            background-color: #020617;
+            color: #e5e7eb;
+            font-size: 14px;
+            outline: none;
+        }
+
+        textarea:focus {
+            border-color: #22c55e;
+            box-shadow: 0 0 0 1px #22c55e33;
+        }
+
+        .actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 4px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 8px 16px;
+            border-radius: 999px;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            background: linear-gradient(135deg, #22c55e, #16a34a);
+            color: #020617;
+            transition: transform 0.08s ease-out, box-shadow 0.08s ease-out, opacity 0.12s;
+            box-shadow: 0 8px 20px rgba(34, 197, 94, 0.35);
+            white-space: nowrap;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 24px rgba(34, 197, 94, 0.45);
+        }
+
+        .btn:active {
+            transform: translateY(0px) scale(0.99);
+            box-shadow: 0 4px 14px rgba(34, 197, 94, 0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.7;
+            cursor: default;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .status {
+            font-size: 12px;
+            color: #9ca3af;
+        }
+
+        .status.error {
+            color: #fca5a5;
+        }
+
+        .answer-card {
+            margin-top: 8px;
+        }
+
+        .answer-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .answer-text {
+            font-size: 14px;
+            line-height: 1.5;
+            color: #e5e7eb;
+        }
+
+        .answer-text h2 {
+            font-size: 18px;
+            margin: 8px 0 4px;
+        }
+
+        .answer-text h3 {
+            font-size: 16px;
+            margin: 6px 0 2px;
+        }
+
+        .answer-text code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }
+
+        .answer-text pre {
+            margin-top: 6px;
+            padding: 8px;
+            border-radius: 8px;
+            background-color: #020617;
+            border: 1px solid #111827;
+            overflow-x: auto;
+        }
+
+        .snippets {
+            margin-top: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .snippet {
+            border-radius: 12px;
+            border: 1px solid #1f2937;
+            background-color: #020617;
+            padding: 10px 12px;
+        }
+
+        .snippet-header {
+            font-size: 12px;
+            color: #9ca3af;
+            margin-bottom: 4px;
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .snippet-header span.path {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .snippet-header span.lines {
+            flex-shrink: 0;
+            font-family: monospace;
+        }
+
+        pre {
+            margin: 0;
+            margin-top: 4px;
+            padding: 8px;
+            border-radius: 8px;
+            background-color: #020617;
+            border: 1px solid #111827;
+            overflow-x: auto;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }
+
+        .footer {
+            font-size: 11px;
+            color: #6b7280;
+            text-align: center;
+            padding: 8px 0 16px;
+        }
+
+        .tag {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            border: 1px solid #374151;
+            color: #9ca3af;
+        }
+
+        @media (max-width: 640px) {
+            .app {
+                padding: 16px 12px 30px;
+            }
+
+            h1 {
+                font-size: 20px;
+            }
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+
+
+
+<body>
+    <div class="app">
+        <header>
+            <h1>
+                <span class="logo">R</span>
+                Reddit Code Assistant
+            </h1>
+            <div class="subtitle">
+                Задай вопрос о коде репозитория Reddit — ассистент найдёт релевантные функции и покажет сниппеты.
+            </div>
+        </header>
+
+        <main class="card">
+            <form id="ask-form">
+                <div class="input-row">
+                    <label for="question">Вопрос к ассистенту</label>
+                    <textarea id="question"
+                        placeholder="Например: Где реализована авторизация пользователя?"></textarea>
+                </div>
+                <div class="actions">
+                    <button type="submit" class="btn" id="ask-btn">
+                        ⬆ Отправить в GigaChat
+                    </button>
+                    <div class="status" id="status-text">
+                        Готов к работе
+                    </div>
+                </div>
+            </form>
+
+            <div class="answer-card">
+                <div class="snippet-header" style="margin-bottom: 4px;">
+                    <span class="path">Ответ ассистента</span>
+                    <span class="tag">Режим: Code RAG</span>
+                </div>
+                <div id="answer" class="answer-text">
+                    Ответ появится здесь.
+                </div>
+            </div>
+
+            <div class="snippets" id="snippets"></div>
+        </main>
+    </div>
+
+    <div class="footer">
+        HaHaTone228 • GigaChat + Chroma + FastAPI
+    </div>
+
+    <script>
+        const form = document.getElementById("ask-form");
+        const questionInput = document.getElementById("question");
+        const answerEl = document.getElementById("answer");
+        const snippetsEl = document.getElementById("snippets");
+        const statusEl = document.getElementById("status-text");
+        const askBtn = document.getElementById("ask-btn");
+
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const question = questionInput.value.trim();
+            if (!question) {
+                statusEl.textContent = "Введите вопрос";
+                statusEl.classList.add("error");
+                return;
+            }
+            statusEl.classList.remove("error");
+            statusEl.textContent = "Думаю над ответом...";
+            askBtn.disabled = true;
+            answerEl.textContent = "";
+            snippetsEl.innerHTML = "";
+
+            try {
+                const res = await fetch("/ask", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({ question })
+                });
+
+                if (!res.ok) {
+                    throw new Error("Ошибка ответа сервера: " + res.status);
+                }
+
+                const data = await res.json();
+
+                // Показать ответ как отформатированный markdown
+                if (data.answer) {
+                    // marked.parse конвертит markdown → HTML
+                    answerEl.innerHTML = window.marked.parse(data.answer);
+                } else {
+                    answerEl.textContent = "Ответ пустой";
+                }
+
+                // Показать сниппеты
+                if (data.snippets && data.snippets.length > 0) {
+                    data.snippets.forEach((snip) => {
+                        const div = document.createElement("div");
+                        div.className = "snippet";
+
+                        const header = document.createElement("div");
+                        header.className = "snippet-header";
+
+                        const pathSpan = document.createElement("span");
+                        pathSpan.className = "path";
+                        pathSpan.textContent = snip.file_path;
+
+                        const linesSpan = document.createElement("span");
+                        linesSpan.className = "lines";
+                        linesSpan.textContent = `стр. ${snip.start_line}-${snip.end_line}`;
+
+                        header.appendChild(pathSpan);
+                        header.appendChild(linesSpan);
+
+                        const pre = document.createElement("pre");
+                        const code = document.createElement("code");
+                        code.textContent = snip.code || "";
+                        pre.appendChild(code);
+
+                        div.appendChild(header);
+                        div.appendChild(pre);
+                        snippetsEl.appendChild(div);
+                    });
+                } else {
+                    const p = document.createElement("div");
+                    p.className = "status";
+                    p.textContent = "Релевантных фрагментов кода не найдено.";
+                    snippetsEl.appendChild(p);
+                }
+
+                statusEl.textContent = "Готов к следующему запросу";
+            } catch (err) {
+                console.error(err);
+                statusEl.textContent = "Ошибка: " + err.message;
+                statusEl.classList.add("error");
+                answerEl.textContent = "Что-то пошло не так при обращении к /ask.";
+            } finally {
+                askBtn.disabled = false;
+            }
+        });
+    </script>
+</body>
+
+</html>
