@@ -7,109 +7,128 @@ from chromadb.config import Settings
 from .indexing import CodeChunk
 from .embeddings import embed_texts, embed_text
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 INDEX_DIR = PROJECT_ROOT / "data" / "index"
 
+# --- Ограничения под GigaChat ---
+MAX_SHORT_TEXT_CHARS = 850        # < 500 токенов
+MAX_SHORT_CODE_LINES = 20         # первые ~20 строк кода
 
-MAX_CHARS_FOR_EMBEDDING = 2000  # можно потом подкрутить
 
+# ============================================================
+# Короткий текст для эмбеддингов
+# ============================================================
 
-def _shorten_for_embedding(text: str, max_chars: int = MAX_CHARS_FOR_EMBEDDING) -> str:
+def chunk_to_short_text(chunk: CodeChunk) -> str:
     """
-    Урезает слишком длинный текст для эмбеддинга, чтобы не ловить 413 от GigaChat.
-    Берём начало и конец, середину выкидываем.
+    Создает компактное описание чанка для эмбеддингов.
+    Даёт модели структуру: что это, где находится, какая сигнатура.
     """
-    text = text.strip()
-    if len(text) <= max_chars:
-        return text
+    code_lines = chunk.code.splitlines()
+    preview = "\n".join(code_lines[:MAX_SHORT_CODE_LINES])
 
-    half = max_chars // 2
-    head = text[:half]
-    tail = text[-half:]
-    return head + "\n...\n# [TRUNCATED]\n...\n" + tail
+    parts = [
+        f"TYPE: {chunk.kind}",
+        f"NAME: {chunk.name}",
+        f"FILE: {chunk.file_path}",
+        f"SIGNATURE: {chunk.signature or ''}",
+        f"DOCSTRING: {chunk.docstring or ''}",
+        "",
+        "CODE_PREVIEW:",
+        preview,
+    ]
+
+    text = "\n".join(parts).strip()
+
+    # Жесткая обрезка — GigaChat иначе даёт 413
+    if len(text) > MAX_SHORT_TEXT_CHARS:
+        text = text[:MAX_SHORT_TEXT_CHARS] + "\n...[TRUNCATED]..."
+
+    return text
+
+
+# ============================================================
+# ChromaDB
+# ============================================================
 
 def get_client() -> chromadb.Client:
-    """
-    Создаёт/открывает клиент Chroma с сохранением индекса в data/index.
-    """
     INDEX_DIR.mkdir(parents=True, exist_ok=True)
-    client = chromadb.Client(
+
+    return chromadb.Client(
         Settings(
             persist_directory=str(INDEX_DIR),
             is_persistent=True,
         )
     )
-    return client
 
 
 def get_collection():
-    """
-    Возвращает (или создаёт) коллекцию для кода Reddit.
-    """
     client = get_client()
-    return client.get_or_create_collection("reddit_code")
+    return client.get_or_create_collection(
+        "reddit_code",
+        metadata={"hnsw:space": "cosine"}
+    )
 
 
-def build_index(chunks: List[CodeChunk], batch_size: int = 64):
-    """
-    Получает список чанков и записывает их в ChromaDB.
-    """
+# ============================================================
+# Построение индекса
+# ============================================================
+
+def build_index(chunks: List[CodeChunk], batch_size: int = 32):
     collection = get_collection()
 
-    ids: List[str] = []
-    documents: List[str] = []
-    metadatas: List[dict] = []
+    print(f"Всего чанков для индексации: {len(chunks)}")
 
-    for ch in chunks:
-        ids.append(f"{ch.file_path}:{ch.start_line}-{ch.end_line}")
-        documents.append(ch.code)
-        metadatas.append(
+    for start in range(0, len(chunks), batch_size):
+        batch = chunks[start:start + batch_size]
+
+        ids = [
+            f"{ch.file_path}:{ch.start_line}-{ch.end_line}"
+            for ch in batch
+        ]
+
+        short_texts = [chunk_to_short_text(ch) for ch in batch]
+        full_texts = [ch.code for ch in batch]
+
+        # Метаданные — только строки и числа
+        metadatas = [
             {
                 "file_path": ch.file_path,
                 "kind": ch.kind,
-                "name": ch.name,
-                "start_line": ch.start_line,
-                "end_line": ch.end_line,
+                "name": ch.name or "",
+                "start_line": int(ch.start_line),
+                "end_line": int(ch.end_line),
+                "signature": ch.signature or "",
                 "language": "python",
             }
-        )
+            for ch in batch
+        ]
 
-    total = len(documents)
-    print(f"Всего чанков для индексации: {total}")
+        # Эмбеддинги считаются ТОЛЬКО по короткому тексту
+        vectors = embed_texts(short_texts)
 
-    for i in range(0, total, batch_size):
-        batch_docs_full = documents[i : i + batch_size]
-        batch_ids = ids[i : i + batch_size]
-        batch_meta = metadatas[i : i + batch_size]
-
-        # Урезаем тексты для эмбеддингов
-        batch_docs_short = [_shorten_for_embedding(d) for d in batch_docs_full]
-
-        vectors = embed_texts(batch_docs_short)
-
-        # В Chroma можно сохранять либо короткий вариант, либо полный.
-        # Для простоты сейчас кладём короткий (для поиска это ок, есть file_path + строки).
         collection.add(
-         ids=batch_ids,
-         documents=batch_docs_short,
-         metadatas=batch_meta,
-          embeddings=vectors,
+            ids=ids,
+            documents=full_texts,
+            metadatas=metadatas,
+            embeddings=vectors,
         )
 
-    print(f"Добавлен батч {i}–{i+len(batch_docs_short)} из {total}")
+        print(f"→ Indexed {start + len(batch)} / {len(chunks)}")
+
+    print("Индекс успешно построен.")
 
 
+# ============================================================
+# Поиск похожих чанков
+# ============================================================
 
 def search_similar(query: str, k: int = 5):
-    """
-    Ищет k самых похожих чанков кода по текстовому запросу.
-    """
     collection = get_collection()
-    query_vec = embed_text(query)
+    qvec = embed_text(query)
 
     result = collection.query(
-        query_embeddings=[query_vec],
+        query_embeddings=[qvec],
         n_results=k,
     )
 
@@ -118,9 +137,10 @@ def search_similar(query: str, k: int = 5):
         matches.append(
             {
                 "id": result["ids"][0][i],
-                "document": result["documents"][0][i],
+                "document": result["documents"][0][i],  # полный код
                 "metadata": result["metadatas"][0][i],
                 "distance": result.get("distances", [[None]])[0][i],
             }
         )
+
     return matches
