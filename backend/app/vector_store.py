@@ -12,7 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 INDEX_DIR = PROJECT_ROOT / "data" / "index"
 
 
-MAX_CHARS_FOR_EMBEDDING = 2000  # можно потом подкрутить
+MAX_CHARS_FOR_EMBEDDING = 500  # можно потом подкрутить
 
 
 def _shorten_for_embedding(text: str, max_chars: int = MAX_CHARS_FOR_EMBEDDING) -> str:
@@ -86,6 +86,7 @@ def build_index(chunks: List[CodeChunk], batch_size: int = 64):
         # Урезаем тексты для эмбеддингов
         batch_docs_short = [_shorten_for_embedding(d) for d in batch_docs_full]
 
+         # ВАЖНО: эмбеддинги вызываем по batch_docs_short
         vectors = embed_texts(batch_docs_short)
 
         # В Chroma можно сохранять либо короткий вариант, либо полный.
@@ -124,3 +125,12 @@ def search_similar(query: str, k: int = 5):
             }
         )
     return matches
+
+def clear_index():
+    """
+    Полностью очищает коллекцию reddit_code.
+    Полезно, если нужно пересобрать индекс с нуля.
+    """
+    collection = get_collection()
+    collection.delete(where={})
+    print("Коллекция reddit_code очищена.")
