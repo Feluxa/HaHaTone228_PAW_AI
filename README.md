@@ -178,6 +178,11 @@ git status   # должно быть "nothing to commit, working tree clean"
 git push
 ```
 
+✅ 4. Запушить в нужную ветку
+```
+git push origin feature/maxim
+```
+
 Зайти на GitHub:
 https://github.com/Feluxa/HaHaTone228_PAW_AI
 
