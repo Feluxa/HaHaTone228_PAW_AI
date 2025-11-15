@@ -8,6 +8,23 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 # Путь до локального репозитория reddit
 REDDIT_ROOT = PROJECT_ROOT / "data" / "reddit"
 
+TEXT_EXTS = (".json", ".md", ".txt", ".ini", ".cfg", ".yaml", ".yml")
+
+
+
+
+@dataclass
+class CodeChunk:
+    """
+    Один логический кусок кода (функция или класс).
+    """
+    file_path: str   # относительный путь внутри reddit_repo
+    start_line: int
+    end_line: int
+    kind: str        # "function" / "class" / "text" / "config" / "doc"
+    name: str        # имя функции/класса или имя файла
+    code: str        # текст кода/документа
+    language: str = "python"  # "python", "json", "markdown", "text", "config", ...
 
 def iter_code_files(root: Path, exts=(".py",)) -> Iterator[Path]:
     """
@@ -19,22 +36,64 @@ def iter_code_files(root: Path, exts=(".py",)) -> Iterator[Path]:
             yield path
 
 
-@dataclass
-class CodeChunk:
+def iter_text_files(root: Path, exts=TEXT_EXTS) -> Iterator[Path]:
     """
-    Один логический кусок кода (функция или класс).
+    Итерируемся по всем текстовым файлам (json, md, txt, конфиги).
     """
-    file_path: str   # относительный путь внутри reddit_repo
-    start_line: int
-    end_line: int
-    kind: str        # "function" или "class"
-    name: str        # имя функции/класса
-    code: str        # текст кода этого блока
+    for path in root.rglob("*"):
+        if path.is_file() and path.suffix.lower() in exts:
+            yield path
+
+def _detect_language_from_suffix(path: Path) -> str:
+    suf = path.suffix.lower()
+    if suf == ".json":
+        return "json"
+    if suf in (".md", ".markdown"):
+        return "markdown"
+    if suf in (".yaml", ".yml"):
+        return "yaml"
+    if suf in (".ini", ".cfg"):
+        return "config"
+    if suf == ".txt":
+        return "text"
+    return "text"
+
+
+def extract_chunks_from_text_file(path: Path) -> List[CodeChunk]:
+    """
+    Достаёт чанки из текстовых файлов (json, md, txt, конфиги).
+    Для простоты: один чанк = весь файл.
+    Если файл очень большой, при эмбеддинге мы всё равно его урежем.
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return []
+
+    lines = text.splitlines()
+    language = _detect_language_from_suffix(path)
+    rel_path = str(path.relative_to(REDDIT_ROOT))
+
+    chunk = CodeChunk(
+        file_path=rel_path,
+        start_line=1,
+        end_line=len(lines) if lines else 1,
+        kind="text",
+        name=path.name,
+        code=text,
+        language=language,
+    )
+
+    return [chunk]
 
 
 def extract_chunks_from_python_file(path: Path) -> List[CodeChunk]:
     """
     Разбирает .py файл через ast и достает из него функции и классы.
+    В текст чанка добавляем:
+    - имя функции/класса,
+    - docstring (если есть),
+    - сам код.
     """
     text = path.read_text(encoding="utf-8", errors="ignore")
     try:
@@ -60,6 +119,15 @@ def extract_chunks_from_python_file(path: Path) -> List[CodeChunk]:
 
             kind = "class" if isinstance(node, ast.ClassDef) else "function"
 
+            # docstring, если есть
+            docstring = ast.get_docstring(node)
+            header_parts = [f"# {kind} {node.name}"]
+            if docstring:
+                header_parts.append(f"# doc: {docstring.strip().replace('\n', ' ')}")
+            header_text = "\n".join(header_parts)
+
+            full_text = f"{header_text}\n\n{code}"
+
             chunks.append(
                 CodeChunk(
                     file_path=str(path.relative_to(REDDIT_ROOT)),
@@ -67,7 +135,8 @@ def extract_chunks_from_python_file(path: Path) -> List[CodeChunk]:
                     end_line=end,
                     kind=kind,
                     name=node.name,
-                    code=code,
+                    code=full_text,
+                    language="python",
                 )
             )
 
@@ -76,30 +145,50 @@ def extract_chunks_from_python_file(path: Path) -> List[CodeChunk]:
 
 def collect_all_chunks(limit_files: int | None = None) -> List[CodeChunk]:
     """
-    Проходит по всем .py файлам в reddit_repo и собирает чанки.
-    limit_files — можно ограничить количество файлов для отладки.
+    Проходит по всем .py файлам в reddit_repo и собирает чанки,
+    а также по текстовым файлам (json, md, txt, конфиги).
+    limit_files — можно ограничить количество файлов для отладки (по коду и по тексту отдельно).
     """
     if not REDDIT_ROOT.exists():
         print(f"reddit_repo not found: {REDDIT_ROOT}")
         return []
 
     all_chunks: List[CodeChunk] = []
-    total_files = 0
-    files_with_chunks = 0
+    total_py_files = 0
+    py_files_with_chunks = 0
 
+    # 1) Python-файлы
     for i, path in enumerate(iter_code_files(REDDIT_ROOT)):
         if limit_files is not None and i >= limit_files:
             break
 
-        total_files += 1
+        total_py_files += 1
         chunks = extract_chunks_from_python_file(path)
         if chunks:
-            files_with_chunks += 1
+            py_files_with_chunks += 1
         all_chunks.extend(chunks)
 
-    print(f"Всего файлов .py обработано: {total_files}")
-    print(f"Файлов, где были найдены функции/классы: {files_with_chunks}")
+    print(f"Всего файлов .py обработано: {total_py_files}")
+    print(f"Файлов, где были найдены функции/классы: {py_files_with_chunks}")
     print(f"Всего чанков (функций/классов): {len(all_chunks)}")
+
+    # 2) Текстовые файлы (json, md, txt, конфиги)
+    total_text_files = 0
+    text_files_with_chunks = 0
+
+    for j, path in enumerate(iter_text_files(REDDIT_ROOT)):
+        if limit_files is not None and j >= limit_files:
+            break
+
+        total_text_files += 1
+        chunks = extract_chunks_from_text_file(path)
+        if chunks:
+            text_files_with_chunks += 1
+        all_chunks.extend(chunks)
+
+    print(f"Всего текстовых файлов (json/md/txt/config) обработано: {total_text_files}")
+    print(f"Файлов, где были найдены текстовые чанки: {text_files_with_chunks}")
+    print(f"ИТОГО ВСЕХ ЧАНКОВ (код + текст): {len(all_chunks)}")
 
     return all_chunks
 

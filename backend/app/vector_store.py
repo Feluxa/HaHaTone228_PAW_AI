@@ -1,6 +1,8 @@
 from pathlib import Path
 from typing import List
 
+import logging
+
 import chromadb
 from chromadb.config import Settings
 
@@ -14,6 +16,7 @@ INDEX_DIR = PROJECT_ROOT / "data" / "index"
 
 MAX_CHARS_FOR_EMBEDDING = 500  # можно потом подкрутить
 
+logger = logging.getLogger("reddit_rag.vector_store")
 
 def _shorten_for_embedding(text: str, max_chars: int = MAX_CHARS_FOR_EMBEDDING) -> str:
     """
@@ -71,7 +74,7 @@ def build_index(chunks: List[CodeChunk], batch_size: int = 64):
                 "name": ch.name,
                 "start_line": ch.start_line,
                 "end_line": ch.end_line,
-                "language": "python",
+                "language": getattr(ch, "language", "python"),
             }
         )
 
@@ -107,6 +110,8 @@ def search_similar(query: str, k: int = 5):
     Ищет k самых похожих чанков кода по текстовому запросу.
     """
     collection = get_collection()
+    logger.info("Vector search: %r (k=%d)", query, k)
+
     query_vec = embed_text(query)
 
     result = collection.query(
@@ -115,16 +120,33 @@ def search_similar(query: str, k: int = 5):
     )
 
     matches = []
-    for i in range(len(result["ids"][0])):
+    ids = result["ids"][0]
+    docs = result["documents"][0]
+    metas = result["metadatas"][0]
+    distances = result.get("distances", [[None]])[0]
+
+    for i in range(len(ids)):
         matches.append(
             {
-                "id": result["ids"][0][i],
-                "document": result["documents"][0][i],
-                "metadata": result["metadatas"][0][i],
-                "distance": result.get("distances", [[None]])[0][i],
+                "id": ids[i],
+                "document": docs[i],
+                "metadata": metas[i],
+                "distance": distances[i],
             }
         )
+
+    # Короткий лог по топ-результатам
+    log_lines = []
+    for m in matches:
+        meta = m["metadata"]
+        log_lines.append(
+            f"{meta.get('file_path')}:{meta.get('start_line')}-{meta.get('end_line')} (dist={m['distance']})"
+        )
+
+    logger.info("Vector search results for %r: %s", query, " | ".join(log_lines))
+
     return matches
+
 
 def clear_index():
     """
